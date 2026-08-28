@@ -2,9 +2,32 @@
 
 import { useChat } from '@ai-sdk/react';
 import { useState } from 'react';
+import { evaluate } from 'mathjs';
+
+function evaluateExpression(expression: string): string {
+  try {
+    const result = evaluate(expression);
+    return String(result);
+  } catch {
+    return 'Error: could not evaluate that expression';
+  }
+}
 
 export default function Home() {
-  const { messages, sendMessage } = useChat();
+  const { messages, sendMessage, addToolResult } = useChat({
+    async onToolCall({ toolCall }) {
+      if (toolCall.toolName === 'calculator') {
+        const input = toolCall.input as { expression: string };
+        const result = evaluateExpression(input.expression);
+
+        addToolResult({
+          tool: 'calculator',
+          toolCallId: toolCall.toolCallId,
+          output: result,
+        });
+      }
+    },
+  });
   const [input, setInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
