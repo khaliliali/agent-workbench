@@ -1,5 +1,9 @@
 {
     "name": "agent-workbench",
     "private": true,
-    "packageManager": "pnpm@11.20.0"
+    "packageManager": "pnpm@11.20.0",
+    "dependencies": {
+        "@ai-sdk/anthropic": "^4.0.44",
+        "ai": "^7.0.83"
+    }
 }
