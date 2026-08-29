@@ -5,12 +5,16 @@ import {
   type UIMessage,
 } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { weatherTool } from '@/lib/tools/weather';
+import { calculatorTool } from '@/lib/tools/calculator';
+import { createWebSearchTool } from '@/lib/tools/web-search';
 
 interface Env {
   ANTHROPIC_API_KEY: string;
   CLIENT_ID: string;
   CLIENT_SECRET: string;
   TOKEN_SIGNING_SECRET: string;
+  TAVILY_API_KEY: string;
 }
 
 async function createToken(signatureSecret: string): Promise<string> {
@@ -66,7 +70,10 @@ async function handleTokenRequest(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  const { clientId, clientSecret } = await request.json();
+  const { clientId, clientSecret } = (await request.json()) as {
+    clientId: string;
+    clientSecret: string;
+  };
   if (clientId !== env.CLIENT_ID || clientSecret !== env.CLIENT_SECRET) {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -101,6 +108,11 @@ export default {
     const result = streamText({
       model: anthropic('claude-sonnet-5'),
       messages: await convertToModelMessages(messages),
+      tools: {
+        weather: weatherTool,
+        calculator: calculatorTool,
+        webSearch: createWebSearchTool(env.TAVILY_API_KEY),
+      },
       stopWhen: stepCountIs(5),
     });
 
