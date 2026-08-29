@@ -8,6 +8,7 @@ import {
 import { anthropic } from '@ai-sdk/anthropic';
 import { weatherTool } from '@/lib/tools/weather';
 import { z } from 'zod';
+import { webSearchTool } from '@/lib/tools/web-search';
 
 const calculatorTool = tool({
   description:
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
     tools: {
       weather: weatherTool,
       calculator: calculatorTool,
+      webSearch: webSearchTool,
     },
     stopWhen: stepCountIs(5), // keep looping — call tools, read results, call more tools if needed
   });
