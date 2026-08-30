@@ -1,103 +1,142 @@
 # Agent Workbench
 
-A portfolio project demonstrating agentic AI application engineering and edge-native platform infrastructure: a streaming LLM chat interface built on Next.js and the Vercel AI SDK, backed by a purpose-built AI gateway service rather than a direct client-to-provider call. It exists to show the engineering judgment behind an AI feature, not just the feature itself — service-to-service auth, distributed tracing, and rate limiting sit alongside the model integration, the same way they would in a production system.
+A portfolio project demonstrating agentic AI application engineering and edge-native platform infrastructure. It includes a streaming LLM chat interface built with Next.js and the Vercel AI SDK, backed by a separate AI gateway service instead of direct client-to-provider calls.
 
-Built by a Senior Frontend/Platform Engineer moving from Angular into React/Next.js, targeting AI Engineer, LLM Engineer, and Forward-Deployed Engineer roles.
+The goal is to show the engineering decisions behind an AI feature, not just the interface itself: auth boundaries, tool orchestration, and service-to-service request flow are all part of the design.
+
+**Live app:** https://agent-workbench-web.alikhalili.workers.dev
+**Gateway:** https://agent-workbench-gateway.alikhalili.workers.dev
 
 ## Architecture
 
-**Target request flow:**
+**Request flow:**
 
+```text
+┌─────────┐ stream ┌────────────────────┐ Bearer ┌──────────────────────┐ stream ┌───────────┐
+│ Browser │ ───────▶ │ Next.js Worker     │ token  │ AI Gateway Worker    │ ───────▶ │ Claude    │
+│(useChat)│ ◀─────── │ apps/web           │ ───────▶ │ services/ai-gateway │ ◀──────▶ │ Sonnet 5  │
+└─────────┘         │ /api/chat          │        │ /token · auth · tools│         │(Anthropic)│
+                   └────────────────────┘        └──────────────────────┘         └───────────┘
+                                              │
+                            ┌─────────────────┴─────────────────┐
+                            │ Weather (Open-Meteo) · Search  │
+                            │ (Tavily) · Calculator (mathjs) │
+                            └─────────────────────────────────┘
 ```
-┌─────────┐  stream   ┌────────────────────┐  stream   ┌──────────────────────┐  stream   ┌───────────┐
-│ Browser │ ────────▶ │  Next.js Worker     │ ────────▶ │  AI Gateway Worker    │ ────────▶ │  Claude   │
-│(useChat)│ ◀──────── │  apps/web           │ ◀──────── │  services/ai-gateway  │ ◀──────── │  Sonnet 5 │
-└─────────┘           │  /api/chat          │           │  M2M auth · tracing · │           │(Anthropic)│
-                       └────────────────────┘           │  rate limiting        │           └───────────┘
-                                                          └──────────────────────┘
-```
 
-`apps/web` is a Next.js app deployed as a Cloudflare Worker (via OpenNext). It owns the browser-facing UI and the `/api/chat` route, which streams `useChat`-compatible responses. `services/ai-gateway` is a second, independently deployed Cloudflare Worker that sits between `apps/web` and Anthropic. It is a deliberate architectural boundary, not a thin pass-through proxy:
+`apps/web` is a Next.js app deployed as a Cloudflare Worker via OpenNext. It owns the browser-facing UI and a thin `/api/chat` route that forwards requests to the gateway. It does not hold model-provider credentials.
 
-- **Credential isolation** — the Anthropic API key lives only in the gateway's environment. The Next.js Worker never holds a provider credential; it authenticates to the gateway with its own machine-to-machine OAuth client.
-- **Distributed tracing** — requests carry a trace ID from the browser through both Workers to the model call and back, so a slow or failed generation can be attributed to a specific hop instead of treated as one opaque round trip.
-- **Rate limiting** — enforced at the gateway, in front of the provider, independent of anything the Next.js app does — the same shape a platform team would put in front of any shared upstream, LLM or otherwise.
+`services/ai-gateway` is a separate Cloudflare Worker that sits between `apps/web` and Anthropic. It is intentionally structured as an auth-and-tool boundary rather than a simple pass-through proxy:
 
-`packages/shared` holds the zod schemas used on both sides of that boundary (request/response contracts for the gateway API), so `apps/web` and `services/ai-gateway` validate against the same types instead of duplicating them.
-
-**Current state:** `services/ai-gateway` and `packages/shared` are scaffolded directories, not yet implemented. Today, `apps/web/api/chat` calls the Anthropic API directly via `@ai-sdk/anthropic`. The diagram above is the target architecture this project is being built toward — see [Status](#status--roadmap).
+- **Machine-to-machine auth** — `apps/web` authenticates to the gateway using a client-credentials flow, exchanging `CLIENT_ID` and `CLIENT_SECRET` for a short-lived bearer token that is signed with a shared secret. The gateway verifies each request before doing any work.
+- **Credential isolation** — the Anthropic and Tavily API keys live only in the gateway environment. They are not exposed to the browser or the web app runtime.
+- **Rate limiting** — the gateway enforces a per-IP request limit using Cloudflare's native rate-limiting binding, rejecting excess requests with `429` before they ever reach the model or search provider.
+- **Tool orchestration** — the gateway exposes server-side tools for weather, web search, and calculator-style evaluation. The AI SDK tool-calling loop allows Claude to call tools, read their output, and continue reasoning before producing a final answer.
 
 ## Tech Stack
 
 - **Next.js 16** — App Router, TypeScript, Turbopack
 - **Tailwind CSS 4**
-- **Vercel AI SDK v5** — `useChat` on the client, `streamText` and `convertToModelMessages` on the server; tool calling planned
-- **Anthropic Claude Sonnet 5** — model provider
-- **Zod** — schema validation, shared across app and gateway
+- **Vercel AI SDK v5** — `useChat` on the client and `streamText` / `convertToModelMessages` on the server
+- **Anthropic Claude Sonnet 5**
+- **Zod** — input validation for tool schemas
+- **mathjs** — safe expression evaluation for the calculator tool
+- **Tavily** — web search API
+- **Open-Meteo** — weather and geocoding data without an API key
 - **pnpm** — monorepo package management
-- **Cloudflare Workers** (via OpenNext) — deployment target for both the app and the gateway, not Cloudflare Pages
+- **Cloudflare Workers** — both app and gateway are deployed as independent Workers
 
 ## Project Structure
 
-```
+```text
 agent-workbench/
 ├── apps/
-│   └── web/                 # Next.js app — chat UI + /api/chat route
-│       └── src/app/
-│           ├── page.tsx           # useChat-based chat UI
-│           └── api/chat/route.ts  # streamText + convertToModelMessages
+│   └── web/                     # Next.js app + thin gateway proxy
+│       ├── src/app/
+│       │   ├── page.tsx        # chat UI with message and tool-call states
+│       │   └── api/chat/route.ts # forwards requests to the gateway
+│       ├── src/lib/gateway-client.ts # token fetch + gateway forwarding
+│       ├── wrangler.jsonc      # Worker config
+│       └── open-next.config.ts
 ├── services/
-│   └── ai-gateway/          # Cloudflare Worker AI gateway (scaffolded, not yet implemented)
-├── packages/
-│   └── shared/               # zod schemas shared between apps/web and services/ai-gateway (scaffolded, not yet implemented)
-└── package.json
+│   └── ai-gateway/             # Cloudflare Worker: auth + model calls + tools
+│       ├── src/index.ts        # /token endpoint + auth verification + streamText
+│       └── src/lib/tools/
+│           ├── weather.ts      # Open-Meteo geocoding + forecast
+│           ├── web-search.ts   # Tavily search integration
+│           └── calculator.ts   # mathjs-based evaluator
+├── package.json                # pnpm workspace root
+└── README.md
 ```
 
 ## Getting Started
 
-**Prerequisites:** Node 20+, pnpm (pinned via `packageManager` at `pnpm@11.20.0`), and an Anthropic API key.
+**Prerequisites:** Node 20+, pnpm, an Anthropic API key, and a Tavily API key.
+
+Run both services in parallel from separate terminals.
+
+### 1. Install dependencies
 
 ```bash
 git clone https://github.com/khaliliali/agent-workbench.git
-cd agent-workbench/apps/web
+cd agent-workbench
 pnpm install
 ```
 
+### 2. Configure the gateway
+
+Create `services/ai-gateway/.dev.vars`:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+TAVILY_API_KEY=tvly-...
+CLIENT_ID=<generate with: node -e "console.log(require('crypto').randomUUID())">
+CLIENT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))">
+TOKEN_SIGNING_SECRET=<generate the same way as CLIENT_SECRET>
+```
+
+### 3. Configure the app
+
 Create `apps/web/.env.local`:
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
+```env
+GATEWAY_URL=http://localhost:8787
+GATEWAY_CLIENT_ID=<same value as CLIENT_ID above>
+GATEWAY_CLIENT_SECRET=<same value as CLIENT_SECRET above>
 ```
 
-Run the dev server:
+### 4. Run the app and gateway
 
 ```bash
-pnpm dev
+# Terminal 1
+cd services/ai-gateway && wrangler dev
+
+# Terminal 2
+cd apps/web && pnpm dev
 ```
 
-The app runs at `http://localhost:3000`. Note the app currently calls Anthropic directly with this key — once `services/ai-gateway` is implemented, the credential moves there and `apps/web` authenticates to the gateway instead (see Architecture above).
-
-## Status / Roadmap
-
-**Implemented**
-- Next.js 16 app scaffold (App Router, TypeScript, Tailwind CSS 4)
-- `/api/chat` route: `streamText` + `convertToModelMessages`, calling Claude Sonnet 5 directly
-- Browser chat UI using `useChat`, streaming responses in real time
-
-**Planned**
-- `services/ai-gateway`: Cloudflare Worker AI gateway with M2M OAuth, distributed tracing, and rate limiting, sitting between `apps/web` and Anthropic
-- `packages/shared`: zod schemas shared between `apps/web` and `services/ai-gateway`
-- Tool calling: web search, weather, calculator, sandboxed code execution
-- Deployment of both Workers to Cloudflare via OpenNext
+Open http://localhost:3000.
 
 ## Key Architectural Decisions
 
-**Why a separate gateway Worker instead of calling Anthropic directly from the Next.js route?**
+### Why a separate gateway worker?
 
-Calling the provider directly from `apps/web` is simpler and is what the code does today. It doesn't scale to more than one client, doesn't give you a place to enforce rate limits independent of the frontend, and puts the provider credential in the same runtime as user-facing request handling. Splitting the gateway into its own Worker means:
+Calling the provider directly from `apps/web` is simpler, but it collapses the credential boundary and the user-facing runtime. A separate gateway gives the project a place to enforce auth, manage upstream credentials, and shape a reusable service boundary. It is a deliberate platform pattern rather than just an extra hop.
 
-- The credential boundary matches the trust boundary — only the gateway needs to know how to talk to Anthropic.
-- Cross-cutting concerns (auth, tracing, rate limiting) live in one place and apply to any future caller of the gateway, not just this one Next.js app.
-- The two services can be deployed, scaled, and reasoned about independently, which is the pattern this project is meant to demonstrate for platform/FDE-style roles — not just "an app that calls an LLM."
+### Why not use a general-purpose code executor?
 
-The tradeoff is an extra network hop and a second service to operate for what is, right now, a single-client chat app. That tradeoff is the point: it's the same one a platform team makes when they put a gateway in front of a shared upstream, made deliberately here rather than deferred.
+The calculator tool is intentionally constrained. Running arbitrary model-generated code is a security problem even for large platforms — Check Point Research demonstrated a full sandbox escape against Cloudflare's own Code Mode product via prompt injection, presented at Black Hat USA 2026. A true sandbox is much harder to reason about than it appears. This project uses `mathjs` for expression evaluation and explicitly avoids presenting that as a general-purpose execution environment.
+
+### Why Tavily?
+
+Tavily is built for agent-style retrieval and returns cleaner, more LLM-friendly results than raw search-engine markup. It also has a lightweight free tier, which makes it suitable for a portfolio project without adding a billing-heavy setup.
+
+## Known Limitations
+
+- Distributed tracing between the web app and gateway was not implemented in this iteration.
+- The calculator tool is intentionally not a general-purpose code executor.
+- `CLIENT_ID` and `CLIENT_SECRET` are static shared credentials for this project setup; a production system would usually rotate and scope credentials per client.
+
+## Notes
+
+This project is intended as a practical demonstration of AI app architecture and platform engineering, especially the boundary between user-facing app logic and upstream model/service access.

@@ -15,6 +15,9 @@ interface Env {
   CLIENT_SECRET: string;
   TOKEN_SIGNING_SECRET: string;
   TAVILY_API_KEY: string;
+  CHAT_RATE_LIMITER: {
+    limit: (options: { key: string }) => Promise<{ success: boolean }>;
+  };
 }
 
 async function createToken(signatureSecret: string): Promise<string> {
@@ -91,6 +94,15 @@ async function handleTokenRequest(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+    const { success } = await env.CHAT_RATE_LIMITER.limit({ key: ip });
+
+    if (!success) {
+      return new Response('Too many requests, please slow down', {
+        status: 429,
+      });
+    }
 
     if (url.pathname === '/token') {
       return handleTokenRequest(request, env);
