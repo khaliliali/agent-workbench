@@ -14,7 +14,7 @@ function evaluateExpression(expression: string): string {
 }
 
 export default function Home() {
-  const { messages, sendMessage, addToolResult } = useChat({
+  const { messages, sendMessage, addToolResult, status, error } = useChat({
     async onToolCall({ toolCall }) {
       if (toolCall.toolName === 'calculator') {
         const input = toolCall.input as { expression: string };
@@ -52,11 +52,22 @@ export default function Home() {
         ))}
       </div>
 
+      {status === 'submitted' && (
+        <div style={{ color: '#888', fontStyle: 'italic' }}> Thinking...</div>
+      )}
+
+      {error && (
+        <div style={{ color: '#c00', marginTop: 8 }}>
+          Something went wrong: {error.message}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} style={{ marginTop: 16 }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder='Say something...'
+          disabled={status === 'submitted' || status === 'streaming'}
           style={{ width: '100%', padding: 8 }}
         />
       </form>
