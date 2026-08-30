@@ -4,12 +4,12 @@ import { evaluate } from 'mathjs';
 
 export const calculatorTool = tool({
   description:
-    'Perform a basic math calculation. Use this for any arithmetic the user asks about.',
+    'Evaluate a math or logic expression. Supports arithmetic, arrays, strings, comparisons, and common functions (e.g. sqrt, sin, round). Use this for calculations, data transformations, or logical checks — not for running arbitrary code.',
   inputSchema: z.object({
     expression: z
       .string()
       .describe(
-        "A math expression to evaluate, e.g. '47 * 892' or '(12 + 8) / 4'",
+        "An expression to evaluate, e.g. '47 * 892', 'sqrt(16)', or '[1,2,3].map(x => x * 2)' style array operations supported by mathjs syntax",
       ),
   }),
   execute: async ({ expression }) => {
