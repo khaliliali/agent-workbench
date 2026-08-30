@@ -43,11 +43,32 @@ export default function Home() {
         {messages.map((message) => (
           <div key={message.id} style={{ marginBottom: 12 }}>
             <strong>{message.role === 'user' ? 'You: ' : 'Claude: '}</strong>
-            {message.parts.map((part, index) =>
-              part.type === 'text' ? (
-                <span key={index}>{part.text}</span>
-              ) : null,
-            )}
+
+            {message.parts.map((part, index) => {
+              if (part.type === 'text') {
+                return <span key={index}>{part.text}</span>;
+              }
+
+              if (part.type.startsWith('tool-') && 'state' in part) {
+                const toolName = part.type.replace('tool-', '');
+
+                if (
+                  part.state === 'input-streaming' ||
+                  part.state === 'input-available'
+                ) {
+                  return (
+                    <div
+                      key={index}
+                      style={{ color: '#888', fontStyle: 'italic' }}
+                    >
+                      calling {toolName}...
+                    </div>
+                  );
+                }
+              }
+
+              return null;
+            })}
           </div>
         ))}
       </div>
