@@ -131,11 +131,24 @@ The calculator tool is intentionally constrained. Running arbitrary model-genera
 
 Tavily is built for agent-style retrieval and returns cleaner, more LLM-friendly results than raw search-engine markup. It also has a lightweight free tier, which makes it suitable for a portfolio project without adding a billing-heavy setup.
 
+## Retrieval-Augmented Generation (RAG)
+
+The gateway can ground Claude's answers in private documents rather than general training knowledge.
+
+**Ingestion** — a local Node script (`services/ai-gateway/scripts/ingest.ts`) extracts text from PDF/DOCX files, splits it into ~500-word overlapping chunks, and sends each to a gateway `/ingest` endpoint (OAuth-protected, same client-credentials flow as chat). The endpoint embeds each chunk with Workers AI (`bge-base-en-v1.5`, 768 dimensions) and stores it in Cloudflare Vectorize alongside its source metadata.
+
+**Retrieval** — on every chat message, the gateway embeds the user's question, queries Vectorize for the 3 closest chunks (cosine similarity), and passes them to Claude via `streamText`'s `system` parameter — instructed to cite which source file it drew from, so answers are independently verifiable rather than trusted blindly.
+
+**Why Cloudflare Vectorize + Workers AI instead of a separate vector DB provider?** Both bindings live in the same account and Worker as everything else — no new API key, no new service to operate, consistent with the project's broader "consolidate on one platform" approach. The tradeoff: Vectorize and Workers AI have no local simulation (`wrangler dev` proxies these bindings to the real, remote service via `remote: true`), so local development for this feature always touches production infrastructure — a real constraint to be aware of, not a limitation this project works around.
+
+**A note on retrieval accuracy:** RAG is a probabilistic improvement, not a guarantee. If a user's question is worded very differently from the source text, the relevant chunk may not rank in the top 3 and won't reach Claude at all. This project uses semantic (embedding-based) search only — no keyword fallback or re-ranking — which is a reasonable scope for a portfolio demonstration but a known gap versus a production RAG system.
+
 ## Known Limitations
 
 - Distributed tracing between the web app and gateway was not implemented in this iteration.
 - The calculator tool is intentionally not a general-purpose code executor.
 - `CLIENT_ID` and `CLIENT_SECRET` are static shared credentials for this project setup; a production system would usually rotate and scope credentials per client.
+- RAG retrieval is semantic-only (no keyword/hybrid search or re-ranking), so relevant content can be missed if a question's wording diverges significantly from the source text.
 
 ## Notes
 
