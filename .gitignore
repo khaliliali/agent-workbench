@@ -2,3 +2,7 @@ node_modules/
 
 services/ai-gateway/.wrangler
 services/ai-gateway/.wrangler/*
+
+.DS_Store
+
+
