@@ -5,10 +5,14 @@
     "dependencies": {
         "@ai-sdk/anthropic": "^4.0.44",
         "ai": "^7.0.83",
+        "mammoth": "^1.12.2",
         "mathjs": "^15.2.0",
+        "pdf-parse": "^2.4.5",
         "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@cloudflare/workers-types": "^5.20260828.1"
+        "@cloudflare/workers-types": "^5.20260828.1",
+        "@types/node": "^26.4.0",
+        "tsx": "^4.23.12"
     }
 }

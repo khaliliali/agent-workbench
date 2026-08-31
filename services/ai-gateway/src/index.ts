@@ -18,6 +18,8 @@ interface Env {
   CHAT_RATE_LIMITER: {
     limit: (options: { key: string }) => Promise<{ success: boolean }>;
   };
+  VECTORIZE: VectorizeIndex;
+  AI: Ai;
 }
 
 async function createToken(signatureSecret: string): Promise<string> {
@@ -91,9 +93,75 @@ async function handleTokenRequest(
   );
 }
 
+async function handleIngestRequest(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const authHeader = request.headers.get('Authorization');
+  const token = authHeader?.replace('Bearer ', '');
+
+  if (!token || !(await verifyToken(token, env.TOKEN_SIGNING_SECRET))) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  const { text, source, chunkIndex } = (await request.json()) as {
+    text: string;
+    source: string;
+    chunkIndex: number;
+  };
+
+  const embeddingResponse = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+    text: [text],
+  });
+  const embedding = embeddingResponse.data[0];
+
+  const id = `${source}-${chunkIndex}`;
+
+  await env.VECTORIZE.upsert([
+    {
+      id,
+      values: embedding,
+      metadata: { text, source, chunkIndex },
+    },
+  ]);
+
+  return new Response(JSON.stringify({ success: true, id }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function retrieveContext(query: string, env: Env): Promise<string> {
+  const embeddingResponse = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+    text: [query],
+  });
+  const queryEmbedding = embeddingResponse.data[0];
+
+  const results = await env.VECTORIZE.query(queryEmbedding, {
+    topK: 3,
+    returnMetadata: true,
+  });
+
+  if (results.matches.length === 0) return '';
+
+  const contextChunks = results.matches
+    .map(
+      (match) => `[Source: ${match.metadata?.source}]\n${match.metadata?.text}`,
+    )
+    .join('\n\n');
+
+  return `Relevant context from documents:\n\n${contextChunks}\n\nWhen you use information from the context above to answer, explicitly say which source file it came from.`;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/ingest') {
+      return handleIngestRequest(request, env);
+    }
+
+    if (url.pathname === '/token') {
+      return handleTokenRequest(request, env);
+    }
 
     const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
     const { success } = await env.CHAT_RATE_LIMITER.limit({ key: ip });
@@ -104,9 +172,6 @@ export default {
       });
     }
 
-    if (url.pathname === '/token') {
-      return handleTokenRequest(request, env);
-    }
     const authHeader = request.headers.get('Authorization');
     const token = authHeader?.replace('Bearer ', '');
 
@@ -117,9 +182,18 @@ export default {
     const anthropic = createAnthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const { messages }: { messages: UIMessage[] } = await request.json();
 
+    const lastUserMessage = messages[messages.length - 1];
+    const lastUserText =
+      lastUserMessage.parts.find((p) => p.type === 'text')?.text ?? '';
+
+    const context = await retrieveContext(lastUserText, env);
+
+    const modelMessages = await convertToModelMessages(messages);
+
     const result = streamText({
       model: anthropic('claude-sonnet-5'),
-      messages: await convertToModelMessages(messages),
+      system: context || undefined,
+      messages: modelMessages,
       tools: {
         weather: weatherTool,
         calculator: calculatorTool,
