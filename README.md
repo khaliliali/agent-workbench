@@ -135,6 +135,24 @@ Tavily is built for agent-style retrieval and returns cleaner, more LLM-friendly
 
 The gateway can ground Claude's answers in private documents rather than general training knowledge.
 
+## Evaluation
+
+`evals/` contains an automated test suite that runs against the live deployed app, replacing manual spot-checking with a repeatable pass/fail report.
+
+**Test cases** span three categories: RAG accuracy (does retrieval pull facts from the correct source document — verified using synthetic test documents with unique, unambiguous facts), tool-calling correctness, and negative cases (does the app correctly decline to answer rather than hallucinate when asked about content it doesn't have).
+
+**Grading** uses LLM-as-judge as the primary method — a second Claude call evaluates whether a given answer satisfies what's expected — reserving exact substring matching for genuinely unambiguous cases (e.g. a specific codename). This is a deliberate choice: LLM output is rarely exact-string-predictable, and one of this project's own test cases (a correct calculator answer, "41,924" vs. an expected "41924") failed exact-match purely on formatting, despite the underlying answer being right — real evidence for why the industry has moved toward LLM-as-judge for this kind of evaluation.
+
+Run it:
+
+```bash
+cd evals
+export ANTHROPIC_API_KEY=<your key>
+npx tsx run-evals.ts
+```
+
+**Known constraint:** grading calls hit the Anthropic API directly (not through the gateway), so eval runs consume separate quota from the app's own usage and are unaffected by the gateway's rate limiter or auth — appropriate for an internal tooling script, not user-facing traffic.
+
 **Ingestion** — a local Node script (`services/ai-gateway/scripts/ingest.ts`) extracts text from PDF/DOCX files, splits it into ~500-word overlapping chunks, and sends each to a gateway `/ingest` endpoint (OAuth-protected, same client-credentials flow as chat). The endpoint embeds each chunk with Workers AI (`bge-base-en-v1.5`, 768 dimensions) and stores it in Cloudflare Vectorize alongside its source metadata.
 
 **Retrieval** — on every chat message, the gateway embeds the user's question, queries Vectorize for the 3 closest chunks (cosine similarity), and passes them to Claude via `streamText`'s `system` parameter — instructed to cite which source file it drew from, so answers are independently verifiable rather than trusted blindly.
