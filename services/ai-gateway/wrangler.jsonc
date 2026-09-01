@@ -16,14 +16,21 @@
 		}
 	],
 	"vectorize": [
-  {
-    "binding": "VECTORIZE",
-    "index_name": "agent-workbench-docs",
-    "remote": true
-  }
-  ],
-  "ai": {
-    "binding": "AI",
-    "remote": true
-  }
+		{
+			"binding": "VECTORIZE",
+			"index_name": "agent-workbench-docs",
+			"remote": true
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"d1_databases": [
+		{
+			"binding": "agent_workbench_metrics",
+			"database_name": "agent-workbench-metrics",
+			"database_id": "7c02597a-764a-4342-89eb-5f5a2dd3774d"
+		}
+	]
 }

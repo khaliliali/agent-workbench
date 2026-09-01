@@ -20,6 +20,7 @@ interface Env {
   };
   VECTORIZE: VectorizeIndex;
   AI: Ai;
+  agent_workbench_metrics: D1Database;
 }
 
 async function createToken(signatureSecret: string): Promise<string> {
@@ -152,6 +153,33 @@ async function retrieveContext(query: string, env: Env): Promise<string> {
   return `Relevant context from documents:\n\n${contextChunks}\n\nWhen you use information from the context above to answer, explicitly say which source file it came from.`;
 }
 
+async function logMetrics(
+  env: Env,
+  inputTokens: number,
+  outputTokens: number,
+  toolCalls: string[],
+  finishReason: string,
+) {
+  const inputCost = (inputTokens / 1_000_000) * 3;
+  const outputCost = (outputTokens / 1_000_000) * 15;
+  const totalCost = inputCost + outputCost;
+
+  await env.agent_workbench_metrics
+    .prepare(
+      `INSERT INTO request_metrics (timestamp, input_tokens, output_tokens, cost_usd, tool_calls, finish_reason)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      new Date().toISOString(),
+      inputTokens,
+      outputTokens,
+      totalCost,
+      toolCalls.join(',') || null,
+      finishReason,
+    )
+    .run();
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -200,6 +228,18 @@ export default {
         webSearch: createWebSearchTool(env.TAVILY_API_KEY),
       },
       stopWhen: stepCountIs(5),
+      onFinish: async ({ usage, finishReason, steps }) => {
+        const toolCalls = steps
+          .flatMap((step) => step.toolCalls ?? [])
+          .map((call) => call.toolName);
+        await logMetrics(
+          env,
+          usage.inputTokens ?? 0,
+          usage.outputTokens ?? 0,
+          toolCalls,
+          finishReason,
+        );
+      },
     });
 
     return result.toUIMessageStreamResponse();
