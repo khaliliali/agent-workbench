@@ -114,6 +114,11 @@ async function handleIngestRequest(
   const embeddingResponse = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
     text: [text],
   });
+
+  if (!('data' in embeddingResponse) || !embeddingResponse.data) {
+    throw new Error('Unexpected async response from embedding model');
+  }
+
   const embedding = embeddingResponse.data[0];
 
   const id = `${source}-${chunkIndex}`;
@@ -135,6 +140,11 @@ async function retrieveContext(query: string, env: Env): Promise<string> {
   const embeddingResponse = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
     text: [query],
   });
+
+  if (!('data' in embeddingResponse) || !embeddingResponse.data) {
+    throw new Error('Unexpected async response from embedding model');
+  }
+
   const queryEmbedding = embeddingResponse.data[0];
 
   const results = await env.VECTORIZE.query(queryEmbedding, {
